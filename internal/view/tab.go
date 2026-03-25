@@ -40,15 +40,17 @@ func (t *Tab) tabAction(event *tcell.EventKey) *tcell.EventKey {
 
 	focusIdx := t.currentFocusIdx()
 
+	// No header item (Profile/Region) has focus — pass Tab through to content.
+	if focusIdx < 0 {
+		return event
+	}
+
 	if event.Key() == tcell.KeyTAB {
 		if focusIdx+1 == len(t.items) {
 			t.App.Application.SetFocus(t.Content.Pages.Current())
 			return event
 		}
 		focusIdx = focusIdx + 1
-	}
-	if focusIdx < 0 {
-		focusIdx = 0
 	}
 	t.App.Application.SetFocus(t.items[focusIdx])
 	return event

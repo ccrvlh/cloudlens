@@ -79,4 +79,16 @@ func coreViewers(vv MetaViewers) {
 	vv[internal.LowerVmImage] = MetaViewer{
 		viewerFn: NewVMI,
 	}
+	vv[internal.LowercaseEKS] = MetaViewer{
+		viewerFn: NewEKS,
+	}
+	vv[internal.LowercaseAPIGW] = MetaViewer{
+		viewerFn: NewAPIGW,
+	}
+	vv[internal.LowercaseBedrock] = MetaViewer{
+		viewerFn: NewBedrock,
+	}
+	vv[internal.LowercaseBilling] = MetaViewer{
+		viewerFn: NewBilling,
+	}
 }

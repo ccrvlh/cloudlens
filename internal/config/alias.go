@@ -145,6 +145,10 @@ func (a *Aliases) loadDefaultAliases(cloud string) {
 		a.declare(internal.LowercaseVPC, internal.UppercaseVPC)
 		a.declare(internal.LowercaseSubnet, internal.UppercaseSubnet)
 		a.declare(internal.LowercaseLamda, internal.UppercaseLamda)
+		a.declare(internal.LowercaseEKS, internal.UppercaseEKS)
+		a.declare(internal.LowercaseAPIGW, internal.UppercaseAPIGW)
+		a.declare(internal.LowercaseBilling, internal.UppercaseBilling)
+		a.declare(internal.LowercaseBedrock, internal.UppercaseBedrock)
 	case internal.GCP:
 		a.declare(internal.LowercaseStorage, internal.UppercaseStorage)
 		a.declare(internal.LowerVmInstance, internal.UppercaseVmInstance)

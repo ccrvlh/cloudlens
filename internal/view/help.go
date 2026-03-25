@@ -139,6 +139,18 @@ func (h *Help) showServices() model.MenuHints {
 				Mnemonic:    "lambda",
 				Description: "View Lamda functions",
 			},
+			{
+				Mnemonic:    "eks",
+				Description: "View EKS clusters",
+			},
+			{
+				Mnemonic:    "apigw",
+				Description: "View API Gateways",
+			},
+			{
+				Mnemonic:    "billing",
+				Description: "View Account Billing",
+			},
 		}
 
 	case internal.GCP:

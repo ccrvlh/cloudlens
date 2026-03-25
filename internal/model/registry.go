@@ -119,4 +119,20 @@ var Registry = map[string]ResourceMeta{
 		DAO:      &dao.VMI{},
 		Renderer: &render.VMI{},
 	},
+	internal.LowercaseEKS: {
+		DAO:      &dao.EKSClusters{},
+		Renderer: &render.EKSCluster{},
+	},
+	internal.LowercaseAPIGW: {
+		DAO:      &dao.APIGateways{},
+		Renderer: &render.APIGateway{},
+	},
+	internal.LowercaseBedrock: {
+		DAO:      &dao.BedrockModels{},
+		Renderer: &render.BedrockModel{},
+	},
+	internal.LowercaseBilling: {
+		DAO:      &dao.Billing{},
+		Renderer: &render.Billing{},
+	},
 }
