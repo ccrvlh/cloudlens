@@ -145,9 +145,20 @@ func (a *App) handleAWS() {
 	r.SetSelectedFunc(a.regionChanged)
 	a.Views()["region"] = r
 
+	accountID, accountAlias := aws.GetAccountInfo(cfg)
+	accountDisplay := accountID
+	if accountAlias != "" {
+		accountDisplay = fmt.Sprintf("%s (%s)", accountAlias, accountID)
+	}
+	ctx = context.WithValue(ctx, internal.KeyActiveAccount, accountID)
+	a.SetContext(ctx)
+	a.App.UpdateContext(ctx)
+	a.Views()["account"] = ui.NewLabel("Account:", accountDisplay)
+
 	infoData := map[string]tview.Primitive{
 		"profile": a.profile(),
 		"region":  a.region(),
+		"account": a.account(),
 	}
 	a.Views()["info"] = ui.NewInfo(infoData)
 	a.toggleHeader(true)
@@ -530,6 +541,10 @@ func (a *App) zone() *ui.DropDown {
 
 func (a *App) region() *ui.DropDown {
 	return a.Views()["region"].(*ui.DropDown)
+}
+
+func (a *App) account() *ui.Label {
+	return a.Views()["account"].(*ui.Label)
 }
 
 func readAndValidateProfile() ([]string, error) {

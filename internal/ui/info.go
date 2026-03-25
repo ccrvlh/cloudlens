@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/derailed/tview"
@@ -28,22 +29,31 @@ func (i *Info) padDropDownLabels() {
 	maxLabelLen := 0
 	maxOptionLen := 0
 	for _, p := range i.items {
-		d, ok := p.(*DropDown)
-		if ok {
-			if len(d.GetLabel()) > maxLabelLen {
-				maxLabelLen = len(d.GetLabel())
+		switch v := p.(type) {
+		case *DropDown:
+			// Use v.label (raw, no markup) for accurate length comparison
+			if len(v.label) > maxLabelLen {
+				maxLabelLen = len(v.label)
 			}
-			if d.GetFieldWidth() > maxOptionLen {
-				maxOptionLen = d.GetFieldWidth()
+			if v.GetFieldWidth() > maxOptionLen {
+				maxOptionLen = v.GetFieldWidth()
+			}
+		case *Label:
+			if len(v.label) > maxLabelLen {
+				maxLabelLen = len(v.label)
 			}
 		}
 	}
 
 	for _, p := range i.items {
-		d, ok := p.(*DropDown)
-		if ok {
-			d.SetFieldWidth(maxOptionLen + DropdownPadSpaces)
-			d.SetLabel(d.GetLabel() + strings.Repeat(" ", (maxLabelLen-len(d.GetLabel()))+1))
+		switch v := p.(type) {
+		case *DropDown:
+			v.SetFieldWidth(maxOptionLen + DropdownPadSpaces)
+			padding := strings.Repeat(" ", (maxLabelLen-len(v.label))+1)
+			v.SetLabel(fmt.Sprintf("[orange::b]%s%s", v.label, padding))
+		case *Label:
+			padding := strings.Repeat(" ", (maxLabelLen-len(v.label))+1)
+			v.SetLabel(v.label + padding)
 		}
 	}
 }

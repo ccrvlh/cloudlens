@@ -11,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	awsV2Config "github.com/aws/aws-sdk-go-v2/config"
 	creds "github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/defaults"
@@ -159,6 +161,27 @@ func GetLocalstackCfg(region string) (awsV2.Config, error) {
 		log.Fatal().Err(err)
 	}
 	return awsLSCfg, nil
+}
+
+// GetAccountInfo returns the AWS account ID and account alias (if available).
+// The alias may be empty if the caller lacks iam:ListAccountAliases permission.
+func GetAccountInfo(cfg awsV2.Config) (accountID, accountAlias string) {
+	stsClient := sts.NewFromConfig(cfg)
+	identity, err := stsClient.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to get caller identity")
+		return "", ""
+	}
+	if identity.Account != nil {
+		accountID = *identity.Account
+	}
+
+	iamClient := iam.NewFromConfig(cfg)
+	aliases, err := iamClient.ListAccountAliases(context.TODO(), &iam.ListAccountAliasesInput{})
+	if err == nil && aliases != nil && len(aliases.AccountAliases) > 0 {
+		accountAlias = aliases.AccountAliases[0]
+	}
+	return accountID, accountAlias
 }
 
 func GetLocastackEndpoint() string {
