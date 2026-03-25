@@ -18,13 +18,8 @@ func NewSG(resource string) ResourceViewer {
 func (sg *SG) enterCmd(evt *tcell.EventKey) *tcell.EventKey {
 	groupId := sg.GetTable().GetSelectedItem()
 	if groupId != "" {
-		f := describeResource
-		if sg.GetTable().enterFn != nil {
-			f = sg.GetTable().enterFn
-		}
-		f(sg.App(), sg.GetTable().GetModel(), sg.Resource(), groupId)
-		sg.App().Flash().Info("groupId: " + groupId)
-
+		sgDetailView := NewSgDetail(sg.App(), groupId)
+		sg.App().inject(sgDetailView)
 	}
 	return nil
 }
