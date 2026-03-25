@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/one2nc/cloudlens/internal/config"
@@ -68,6 +70,188 @@ func GetSingleInstance(cfg aws.Config, insId string) string {
 	return string(r)
 }
 
+func GetSingleInstanceDetail(cfg aws.Config, insId string) *EC2DetailResp {
+	ec2Client := ec2.NewFromConfig(cfg)
+	result, err := ec2Client.DescribeInstances(context.Background(), &ec2.DescribeInstancesInput{
+		InstanceIds: []string{insId},
+	})
+	if err != nil {
+		log.Info().Msg(fmt.Sprintf("Error fetching instance with id: %s, err: %v", insId, err))
+		return nil
+	}
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return nil
+	}
+
+	inst := result.Reservations[0].Instances[0]
+
+	tags := map[string]string{}
+	for _, t := range inst.Tags {
+		tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
+	}
+
+	sgs := make([]EC2SecurityGroup, 0, len(inst.SecurityGroups))
+	for _, sg := range inst.SecurityGroups {
+		sgs = append(sgs, EC2SecurityGroup{
+			GroupId:   aws.ToString(sg.GroupId),
+			GroupName: aws.ToString(sg.GroupName),
+		})
+	}
+
+	iamProfile := ""
+	if inst.IamInstanceProfile != nil {
+		iamProfile = aws.ToString(inst.IamInstanceProfile.Arn)
+	}
+
+	localZone, err := config.GetLocalTimeZone()
+	launchTimeStr := ""
+	if inst.LaunchTime != nil {
+		if err == nil {
+			loc, _ := time.LoadLocation(localZone)
+			launchTimeStr = inst.LaunchTime.In(loc).Format("Mon Jan _2 15:04:05 2006")
+		} else {
+			launchTimeStr = inst.LaunchTime.UTC().Format("Mon Jan _2 15:04:05 2006")
+		}
+	}
+
+	tenancy := ""
+	az := ""
+	if inst.Placement != nil {
+		tenancy = string(inst.Placement.Tenancy)
+		az = aws.ToString(inst.Placement.AvailabilityZone)
+	}
+
+	return &EC2DetailResp{
+		InstanceId:      aws.ToString(inst.InstanceId),
+		Name:            tags["Name"],
+		InstanceState:   string(inst.State.Name),
+		InstanceType:    string(inst.InstanceType),
+		AvailabilityZone: az,
+		Tenancy:         tenancy,
+		VpcId:           aws.ToString(inst.VpcId),
+		SubnetId:        aws.ToString(inst.SubnetId),
+		PrivateIP:       aws.ToString(inst.PrivateIpAddress),
+		PublicIP:        aws.ToString(inst.PublicIpAddress),
+		PrivateDNS:      aws.ToString(inst.PrivateDnsName),
+		PublicDNS:       aws.ToString(inst.PublicDnsName),
+		ImageId:         aws.ToString(inst.ImageId),
+		KeyName:         aws.ToString(inst.KeyName),
+		Architecture:    string(inst.Architecture),
+		RootDeviceName:  aws.ToString(inst.RootDeviceName),
+		RootDeviceType:  string(inst.RootDeviceType),
+		IamProfile:      iamProfile,
+		MonitoringState: string(inst.Monitoring.State),
+		LaunchTime:      launchTimeStr,
+		SecurityGroups:  sgs,
+		Tags:            tags,
+	}
+}
+
+func GetInstanceMonitoring(cfg aws.Config, instanceId string) *EC2MonitoringResp {
+	result := &EC2MonitoringResp{
+		InstanceStatus: "unavailable",
+		SystemStatus:   "unavailable",
+	}
+
+	ec2Client := ec2.NewFromConfig(cfg)
+	statusOut, err := ec2Client.DescribeInstanceStatus(context.Background(), &ec2.DescribeInstanceStatusInput{
+		InstanceIds:         []string{instanceId},
+		IncludeAllInstances: aws.Bool(true),
+	})
+	if err == nil && len(statusOut.InstanceStatuses) > 0 {
+		s := statusOut.InstanceStatuses[0]
+		result.InstanceStatus = string(s.InstanceStatus.Status)
+		result.SystemStatus = string(s.SystemStatus.Status)
+	}
+
+	cwClient := cloudwatch.NewFromConfig(cfg)
+	now := time.Now()
+	start1h := now.Add(-1 * time.Hour)
+	start5m := now.Add(-5 * time.Minute)
+	dim := []cwtypes.Dimension{{Name: aws.String("InstanceId"), Value: aws.String(instanceId)}}
+
+	cpuOut, err := cwClient.GetMetricStatistics(context.Background(), &cloudwatch.GetMetricStatisticsInput{
+		Namespace:  aws.String("AWS/EC2"),
+		MetricName: aws.String("CPUUtilization"),
+		Dimensions: dim,
+		StartTime:  &start1h,
+		EndTime:    &now,
+		Period:     aws.Int32(3600),
+		Statistics: []cwtypes.Statistic{cwtypes.StatisticAverage},
+	})
+	if err == nil && len(cpuOut.Datapoints) > 0 {
+		result.CPUAvg1h = aws.ToFloat64(cpuOut.Datapoints[0].Average)
+		result.CPUAvg1hOK = true
+	}
+
+	sparkOut, err := cwClient.GetMetricStatistics(context.Background(), &cloudwatch.GetMetricStatisticsInput{
+		Namespace:  aws.String("AWS/EC2"),
+		MetricName: aws.String("CPUUtilization"),
+		Dimensions: dim,
+		StartTime:  &start1h,
+		EndTime:    &now,
+		Period:     aws.Int32(300),
+		Statistics: []cwtypes.Statistic{cwtypes.StatisticAverage},
+	})
+	if err == nil && len(sparkOut.Datapoints) > 0 {
+		pts := sparkOut.Datapoints
+		for i := 0; i < len(pts)-1; i++ {
+			for j := i + 1; j < len(pts); j++ {
+				if pts[j].Timestamp.Before(*pts[i].Timestamp) {
+					pts[i], pts[j] = pts[j], pts[i]
+				}
+			}
+		}
+		spark := make([]float64, len(pts))
+		for i, p := range pts {
+			spark[i] = aws.ToFloat64(p.Average)
+		}
+		result.CPUSpark = spark
+	}
+
+	memOut, err := cwClient.GetMetricStatistics(context.Background(), &cloudwatch.GetMetricStatisticsInput{
+		Namespace:  aws.String("CWAgent"),
+		MetricName: aws.String("mem_used_percent"),
+		Dimensions: dim,
+		StartTime:  &start5m,
+		EndTime:    &now,
+		Period:     aws.Int32(300),
+		Statistics: []cwtypes.Statistic{cwtypes.StatisticAverage},
+	})
+	if err == nil && len(memOut.Datapoints) > 0 {
+		result.MemUsedPct = aws.ToFloat64(memOut.Datapoints[0].Average)
+		result.MemOK = true
+	}
+
+	netIn, err := cwClient.GetMetricStatistics(context.Background(), &cloudwatch.GetMetricStatisticsInput{
+		Namespace:  aws.String("AWS/EC2"),
+		MetricName: aws.String("NetworkIn"),
+		Dimensions: dim,
+		StartTime:  &start5m,
+		EndTime:    &now,
+		Period:     aws.Int32(300),
+		Statistics: []cwtypes.Statistic{cwtypes.StatisticSum},
+	})
+	netOut, err2 := cwClient.GetMetricStatistics(context.Background(), &cloudwatch.GetMetricStatisticsInput{
+		Namespace:  aws.String("AWS/EC2"),
+		MetricName: aws.String("NetworkOut"),
+		Dimensions: dim,
+		StartTime:  &start5m,
+		EndTime:    &now,
+		Period:     aws.Int32(300),
+		Statistics: []cwtypes.Statistic{cwtypes.StatisticSum},
+	})
+	if err == nil && len(netIn.Datapoints) > 0 {
+		result.NetInAvg5m = aws.ToFloat64(netIn.Datapoints[0].Sum)
+	}
+	if err2 == nil && len(netOut.Datapoints) > 0 {
+		result.NetOutAvg5m = aws.ToFloat64(netOut.Datapoints[0].Sum)
+	}
+	result.NetOK = err == nil || err2 == nil
+
+	return result
+}
+
 func GetSecGrps(cfg aws.Config) ([]SGResp, error) {
 	var sgInfo []SGResp
 	ec2Client := ec2.NewFromConfig(cfg)
@@ -100,6 +284,99 @@ func GetSingleSecGrp(cfg aws.Config, sgId string) string {
 	}
 	r, _ := json.MarshalIndent(result, "", " ")
 	return string(r)
+}
+
+func GetSingleSecurityGroup(cfg aws.Config, sgId string) *SGDetailResp {
+	ec2Serv := *ec2.NewFromConfig(cfg)
+	result, err := ec2Serv.DescribeSecurityGroups(context.Background(), &ec2.DescribeSecurityGroupsInput{
+		GroupIds: []string{sgId},
+	})
+	if err != nil {
+		log.Info().Msg(fmt.Sprintf("Error in fetching Security Group: %s err: %v ", sgId, err))
+		return nil
+	}
+
+	if len(result.SecurityGroups) == 0 {
+		return nil
+	}
+
+	sg := result.SecurityGroups[0]
+	detail := &SGDetailResp{
+		GroupId:              *sg.GroupId,
+		GroupName:            *sg.GroupName,
+		Description:          *sg.Description,
+		OwnerId:              *sg.OwnerId,
+		VpcId:                *sg.VpcId,
+		IpPermissions:        make([]IpPermission, 0),
+		IpPermissionsEgress:  make([]IpPermission, 0),
+	}
+
+	for _, perm := range sg.IpPermissions {
+		p := IpPermission{
+			IpProtocol:       perm.IpProtocol,
+			FromPort:         perm.FromPort,
+			ToPort:           perm.ToPort,
+			IpRanges:         make([]IpRange, 0),
+			UserIdGroupPairs: make([]UserIdGroupPair, 0),
+			PrefixListIds:    make([]PrefixListId, 0),
+		}
+		for _, ipRange := range perm.IpRanges {
+			p.IpRanges = append(p.IpRanges, IpRange{
+				CidrIp:      *ipRange.CidrIp,
+				Description: derefString(ipRange.Description),
+			})
+		}
+		for _, pair := range perm.UserIdGroupPairs {
+			p.UserIdGroupPairs = append(p.UserIdGroupPairs, UserIdGroupPair{
+				GroupId:     derefString(pair.GroupId),
+				Description: derefString(pair.Description),
+			})
+		}
+		for _, pl := range perm.PrefixListIds {
+			p.PrefixListIds = append(p.PrefixListIds, PrefixListId{
+				PrefixListId: *pl.PrefixListId,
+			})
+		}
+		detail.IpPermissions = append(detail.IpPermissions, p)
+	}
+
+	for _, perm := range sg.IpPermissionsEgress {
+		p := IpPermission{
+			IpProtocol:       perm.IpProtocol,
+			FromPort:         perm.FromPort,
+			ToPort:           perm.ToPort,
+			IpRanges:         make([]IpRange, 0),
+			UserIdGroupPairs: make([]UserIdGroupPair, 0),
+			PrefixListIds:    make([]PrefixListId, 0),
+		}
+		for _, ipRange := range perm.IpRanges {
+			p.IpRanges = append(p.IpRanges, IpRange{
+				CidrIp:      *ipRange.CidrIp,
+				Description: derefString(ipRange.Description),
+			})
+		}
+		for _, pair := range perm.UserIdGroupPairs {
+			p.UserIdGroupPairs = append(p.UserIdGroupPairs, UserIdGroupPair{
+				GroupId:     derefString(pair.GroupId),
+				Description: derefString(pair.Description),
+			})
+		}
+		for _, pl := range perm.PrefixListIds {
+			p.PrefixListIds = append(p.PrefixListIds, PrefixListId{
+				PrefixListId: *pl.PrefixListId,
+			})
+		}
+		detail.IpPermissionsEgress = append(detail.IpPermissionsEgress, p)
+	}
+
+	return detail
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func GetVolumes(cfg aws.Config) ([]EBSResp, error) {

@@ -35,13 +35,8 @@ func (e *EC2) bindKeys(aa ui.KeyActions) {
 func (e *EC2) enterCmd(evt *tcell.EventKey) *tcell.EventKey {
 	instanceId := e.GetTable().GetSelectedItem()
 	if instanceId != "" {
-		f := describeResource
-		if e.GetTable().enterFn != nil {
-			f = e.GetTable().enterFn
-		}
-		f(e.App(), e.GetTable().GetModel(), e.Resource(), instanceId)
-		e.App().Flash().Info("Instance Id: " + instanceId)
+		detailView := NewEC2Detail(e.App(), instanceId)
+		e.App().inject(detailView)
 	}
-
 	return nil
 }
